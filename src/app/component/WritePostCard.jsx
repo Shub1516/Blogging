@@ -1,0 +1,272 @@
+"use client";
+import { useState } from "react";
+import { TfiWrite } from "react-icons/tfi";
+import { FaImage, FaSpinner, FaCheckCircle } from "react-icons/fa"; // Added icons
+import { Select, SelectItem } from "@heroui/react";
+import Editor from "../component/Editor";
+import { uploadToR2 } from "./actions/upload"; // Import your R2 action
+import Image from "next/image";
+import { createSupabaseBrowserClient } from "../lib/supabase/client.js";
+import { toast } from "sonner";
+import { useRouter } from "next/navigation";
+import { redirect } from "next/navigation";
+import defaultImage from "../../../public/placeholder-image.png";
+
+export default function WritePostCard() {
+  const router = useRouter();
+  const supabase = createSupabaseBrowserClient(); 
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState(null);
+  const [coverImage, setCoverImage] = useState(""); // Stores R2 URL
+  const [isUploading, setIsUploading] = useState(false);
+  const [bannerFile, setBannerFile] = useState(null);
+  const [categories, setCategories] = useState(new Set([]));
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  //const [isModelOpen, setIsModelOpen] = useState(false);
+  //const { isOpen, onOpen, onOpenChange } = useDisclosure();
+
+  // Function to handle the Cover Image upload to R2
+  const handleImageUpload = async (e) => {
+    if (!bannerFile) return;
+    //setIsUploading(true);
+    const formData = new FormData();
+    formData.append("file", bannerFile);
+
+    const result = await uploadToR2(formData);
+
+    if (result.success) {
+      console.log("uploaded image", result);
+      setCoverImage(result.url);
+      toast.success("Banner Added!", {
+        description: "Your banner is added success",
+      });
+      return result.url;
+    } else {
+      alert("Upload failed: " + result.message);
+    }
+    // setIsUploading(false);
+  };
+
+  const handleImage = (e) => {
+    setIsUploading(true);
+    const file = e.target.files[0];
+    if (!file) return;
+    setBannerFile(file);
+    setIsUploading(false);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    const file = await handleImageUpload();
+    if (!file) {
+      toast.error("Upload Banner Image", {
+        description: "No Banner image uploaded",
+      });
+      setIsSubmitting(false);
+      return;
+    }
+    // Get the current user
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      redirect("/login");
+    }
+    //console.log("submit event is",e.target.id)
+    var isPublish = false;
+    if (e.target.id === "publish-button") {
+      isPublish = true;
+    }
+    const { error, data } = await supabase
+      .from("posts")
+      .insert({
+        title,
+        content, // This is the JSON from Editor.js
+        published: isPublish,
+        posted_by: user.id,
+        banner_image: file,
+        category: Array.from(categories),
+      })
+      .select()
+      .single(); // Security: ensures only the owner can update
+
+    if (!error) {
+      toast.success("Post Successfully!", {
+        description: "Post has been successfully posted",
+      });
+      setIsSubmitting(false);
+      router.push(`/postDetail/${data.id}`);
+    } else {
+      console.error(error);
+    }
+    router.refresh();
+  };
+
+  return (
+    <>
+      <div className="min-h-screen bg-gray-50 px-4 sm:px-6 lg:px-8 py-6">
+        <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-md p-4 sm:p-6 lg:p-8">
+          {/* Header */}
+          <div className="flex items-start sm:items-center gap-3 mb-6">
+            <div className="p-3 rounded-full bg-red-100 text-red-600 shrink-0">
+              <TfiWrite className="text-lg sm:text-2xl" />
+            </div>
+            <div>
+              <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold">
+                Create New Post
+              </h1>
+              <p className="text-sm sm:text-base text-gray-500">
+                Share your thoughts with the community
+              </p>
+            </div>
+          </div>
+
+          {/* bannerImage */}
+
+          <div className="relative group w-full h-64 bg-slate-100 rounded-2xl mb-8 overflow-hidden mt-3 border-2 border-dashed border-transparent hover:border-red-400 transition-all">
+            {/* The Image Display */}
+            <Image
+              src={coverImage || defaultImage} // Fallback if empty
+              width={900}
+              height={400}
+              alt="Banner Image"
+              className="w-full h-full object-contain"
+              priority={false}
+            />
+
+            {/* The Upload Overlay */}
+            <label
+              htmlFor="banner-upload"
+              className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-white"
+            >
+              {isUploading ? (
+                <FaSpinner className="animate-spin text-3xl" />
+              ) : (
+                <>
+                  <FaImage className="text-3xl mb-2" />
+                  <span className="text-sm font-semibold">
+                    Click to Change Banner
+                  </span>
+                </>
+              )}
+            </label>
+
+            {/* Hidden File Input */}
+            <input
+              id="banner-upload"
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleImage} // This triggers your existing handleImage function
+            />
+          </div>
+          <span className="flex justify-end text-green-500">
+            {bannerFile ? "Image added" : ""}
+          </span>
+          {/*  */}
+
+          <form className="space-y-6">
+            {/* Title */}
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Post Title
+              </label>
+              <input
+                type="text"
+                value={title}
+                maxLength={100}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Enter post title"
+                className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:ring-2 focus:ring-red-400 focus:outline-none"
+              />
+            </div>
+
+            {/* Category */}
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-bold text-gray-700 ml-1">
+                Category
+              </label>
+              <Select
+                placeholder="Select a category"
+                selectionMode="multiple"
+                variant="bordered"
+                selectedKeys={categories}
+                onSelectionChange={setCategories}
+                // 1. Force the icon to the end using the slot prop
+                 // Optional: stops the arrow from flipping
+                classNames={{
+                  base: "w-full",
+                  trigger: [
+                    "h-14",
+                    "bg-white",
+                    "border-2",
+                    "border-gray-100",
+                    "group-data-[focus=true]:border-red-500",
+                    "rounded-2xl",
+                    "pr-4", // Add right padding to ensure space for the arrow
+                  ],
+                  // 2. Target the selector icon slot specifically
+                  selectorIcon: "right-4 left-auto", // Force right alignment, remove left
+                  popoverContent:
+                    "bg-white border border-gray-100 shadow-xl rounded-2xl",
+                  listbox: "bg-white",
+                }}
+              >
+                <SelectItem key="technology" className="rounded-xl">
+                  Technology
+                </SelectItem>
+                <SelectItem key="art" className="rounded-xl">
+                  Art
+                </SelectItem>
+                <SelectItem key="science" className="rounded-xl">
+                  Science
+                </SelectItem>
+              </Select>
+            </div>
+
+            {/* Editor.js Content */}
+            <div>
+              <label className="block text-sm font-medium mb-1">Content</label>
+              <Editor content={content} onChange={setContent} />
+            </div>
+
+            {/* Upload + Actions */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-t pt-6">
+              <div className="flex flex-col gap-2">
+                <label className="flex items-center gap-2 text-sm sm:text-base cursor-pointer text-gray-600 hover:text-red-500 transition"></label>
+
+                {/* Image Preview Thumbnail */}
+              </div>
+
+              <div className="flex flex-col xs:flex-row gap-3 sm:flex-row">
+                <button
+                  type="button"
+                  id="draft-button"
+                  onClick={handleSubmit}
+                  disabled={isSubmitting}
+                  className="px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-100 transition cursor-pointer"
+                >
+                  Save Draft
+                </button>
+                <button
+                  type="submit"
+                  id="publish-button"
+                  onClick={handleSubmit}
+                  disabled={isSubmitting}
+                  className="px-5 py-2 rounded-lg bg-linear-to-r from-[#f32a3b] to-pink-500 text-white font-semibold hover:opacity-90 transition cursor-pointer"
+                >
+                  Publish
+                </button>
+              </div>
+            </div>
+          </form>
+          {/* Model */}
+
+          {/* Model Close */}
+        </div>
+      </div>
+    </>
+  );
+}
